@@ -1,0 +1,8 @@
+crewai
+crewai-tools
+google-genai
+anthropic
+pillow
+python-dotenv
+litellm
+ollama
