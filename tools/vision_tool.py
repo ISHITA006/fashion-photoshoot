@@ -5,19 +5,55 @@ from pydantic import BaseModel
 
 class VisionInput(BaseModel):
     image_path: str
-    analysis_type: str   # "clothing" or "model"
+    analysis_type: str  # "clothing" or "model"
     product_brief: str = ""
+
+
+CLOTHING_PROMPT_TEMPLATE = """Analyze this flat lay clothing image. Product brief: {product_brief}
+
+First, identify the garment type (e.g. shirt, top, dress, kurta, skirt, pants, shorts, co-ord, jacket, etc.).
+
+Then return ONLY a valid JSON object with these universal fields:
+  garment_type, primary_color, secondary_colors, fabric_texture, fit_silhouette,
+  key_details (array of 5+ specific observations covering the hero design features —
+    e.g. prints, embroidery, cutwork, pleats, buttons, zippers, pockets, lace, ruffles,
+    drawstrings, waistbands, leg openings, slits, etc. — whatever is most prominent),
+  styling_notes, brand_aesthetic, target_demographic
+
+Then add ALL garment-type-specific fields that apply:
+  - If top / shirt / blouse / kurta / jacket: sleeve_style, neckline, hem_style, closure_type
+  - If dress / tunic / co-ord top: sleeve_style, neckline, hem_style, waist_definition, length
+  - If skirt: waist_style, silhouette, length, hem_style
+  - If pants / trousers / palazzos: waist_style, leg_style, rise, length, hem_style
+  - If shorts: waist_style, leg_style, length, hem_style
+
+Do NOT force fields that don't apply (e.g. do not add neckline for pants).
+Focus key_details on what makes this specific product visually distinctive."""
+
+MODEL_PROMPT = """Analyze this model reference photo. Your output will be used for AI identity \
+preservation — the goal is to reproduce this exact person's appearance in generated images.
+
+Return ONLY a valid JSON object with these exact keys:
+  age_range, ethnicity,
+  skin_tone (use Fitzpatrick scale + undertone, e.g. 'warm medium-brown, Fitzpatrick IV, golden undertone'),
+  eye_color, eye_shape, nose_description, lip_fullness, face_shape,
+  hair_color, hair_length, hair_style, hair_texture,
+  body_type, height_impression,
+  distinctive_features (array of 3+ specific traits), expression_style, pose_style
+
+Use precise, specific descriptors — no vague terms like 'medium skin' or 'average build'.
+The more specific your description, the better the identity match will be."""
+
 
 def _run_vision_ollama(image_path: str, analysis_type: str, product_brief: str) -> str:
     """Use local Ollama + LLaVA (free). Requires: ollama pull llava"""
     import ollama
-    if analysis_type == "clothing":
-        prompt = f"""Analyze this flat lay clothing image. Product brief: {product_brief}
-Return JSON with: garment_type, primary_color, secondary_colors, fabric_texture,
-fit_silhouette, key_details (list), styling_notes, brand_aesthetic"""
-    else:
-        prompt = """Analyze this model photo. Return JSON with: age_range, skin_tone,
-hair_color, hair_length, hair_style, body_type, distinctive_features, pose_style"""
+
+    prompt = (
+        CLOTHING_PROMPT_TEMPLATE.format(product_brief=product_brief)
+        if analysis_type == "clothing"
+        else MODEL_PROMPT
+    )
     try:
         r = ollama.chat(
             model="llava",
@@ -31,33 +67,60 @@ def _run_vision_anthropic(image_path: str, analysis_type: str, product_brief: st
     """Use Anthropic Claude (requires ANTHROPIC_API_KEY and credits)."""
     import anthropic
     import base64
+
     client = anthropic.Anthropic()
+
+    ext = os.path.splitext(image_path)[1].lower()
+    media_type_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }
+    media_type = media_type_map.get(ext, "image/jpeg")
+
     with open(image_path, "rb") as f:
         img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-    if analysis_type == "clothing":
-        prompt = f"""Analyze this flat lay clothing image. Product brief: {product_brief}
-Return JSON with: garment_type, primary_color, secondary_colors, fabric_texture,
-fit_silhouette, key_details (list), styling_notes, brand_aesthetic"""
-    else:
-        prompt = """Analyze this model photo. Return JSON with: age_range, skin_tone,
-hair_color, hair_length, hair_style, body_type, distinctive_features, pose_style"""
+
+    prompt = (
+        CLOTHING_PROMPT_TEMPLATE.format(product_brief=product_brief)
+        if analysis_type == "clothing"
+        else MODEL_PROMPT
+    )
+
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        messages=[{"role": "user", "content": [
-            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img_data}},
-            {"type": "text", "text": prompt}
-        ]}]
+        max_tokens=1200,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": img_data,
+                        },
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
     )
     return response.content[0].text
 
 class VisionAnalysisTool(BaseTool):
     name: str = "Vision Analysis Tool"
-    description: str = "Analyzes clothing or model images using vision AI"
+    description: str = (
+        "Analyzes clothing flat lay images or model reference photos using vision AI. "
+        "For clothing: extracts garment attributes for generation prompts. "
+        "For model: extracts precise physical descriptors for identity preservation."
+    )
     args_schema: Type[BaseModel] = VisionInput
 
     def _run(self, image_path: str, analysis_type: str, product_brief: str = "") -> str:
-        # Free path: Ollama + llava. Cloud path: Anthropic when key is set.
         if os.environ.get("USE_ANTHROPIC_VISION") and os.environ.get("ANTHROPIC_API_KEY"):
             return _run_vision_anthropic(image_path, analysis_type, product_brief)
         return _run_vision_ollama(image_path, analysis_type, product_brief)
