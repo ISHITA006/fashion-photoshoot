@@ -44,9 +44,8 @@ Return ONLY a valid JSON object with these exact keys:
 Use precise, specific descriptors — no vague terms like 'medium skin' or 'average build'.
 The more specific your description, the better the identity match will be."""
 
-
 def _run_vision_ollama(image_path: str, analysis_type: str, product_brief: str) -> str:
-    """Use local Ollama + LLaVA (free). Requires: ollama pull llava"""
+    """Use local Ollama + Gemma 3 (vision). Requires: ollama pull gemma3:4b"""
     import ollama
 
     prompt = (
@@ -56,61 +55,24 @@ def _run_vision_ollama(image_path: str, analysis_type: str, product_brief: str) 
     )
     try:
         r = ollama.chat(
-            model="llava",
-            messages=[{"role": "user", "content": prompt, "images": [image_path]}],
+            model="gemma3:4b",  # was "llava"
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "images": [image_path],
+                }
+            ],
         )
         return r["message"]["content"] or "{}"
     except Exception as e:
-        return f'{{"error": "Ollama vision failed. Run: ollama pull llava. Details: {e!s}"}}'
-
-def _run_vision_anthropic(image_path: str, analysis_type: str, product_brief: str) -> str:
-    """Use Anthropic Claude (requires ANTHROPIC_API_KEY and credits)."""
-    import anthropic
-    import base64
-
-    client = anthropic.Anthropic()
-
-    ext = os.path.splitext(image_path)[1].lower()
-    media_type_map = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".webp": "image/webp",
-        ".gif": "image/gif",
-    }
-    media_type = media_type_map.get(ext, "image/jpeg")
-
-    with open(image_path, "rb") as f:
-        img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-
-    prompt = (
-        CLOTHING_PROMPT_TEMPLATE.format(product_brief=product_brief)
-        if analysis_type == "clothing"
-        else MODEL_PROMPT
-    )
-
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1200,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": img_data,
-                        },
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
-    )
-    return response.content[0].text
-
+        return (
+            '{"error": '
+            '"Ollama Gemma 3 vision failed. '
+            'Run: ollama pull gemma3:4b. '
+            f'Details: {e!s}"}}'
+        )
+    
 class VisionAnalysisTool(BaseTool):
     name: str = "Vision Analysis Tool"
     description: str = (

@@ -5,9 +5,7 @@ from tools.qc_tool import QualityCheckTool
 # from tools.export_json_tool import ExportJsonTool
 
 # Default: local Ollama (free). Requires: ollama pull llama3.2 (see FREE_SETUP.md).
-# To use cloud instead: set OPENAI_API_KEY or GOOGLE_API_KEY and use e.g. "gemini-2.0-flash-001".
-OLLAMA_LLM = "ollama/llama3.2"
-GEMINI_LLM = "gemini-2.0-flash-001"
+OLLAMA_LLM = "ollama/gemma3:4b"
 
 vision_tool = VisionAnalysisTool()
 generation_tool = NanaBananaGenerationTool()
@@ -24,6 +22,8 @@ clothing_analyzer = Agent(
     tools=[vision_tool],
     verbose=True,
     llm=OLLAMA_LLM,
+    max_iter=5,
+    max_execution_time=60,  # seconds
 )
 
 model_analyzer = Agent(
@@ -42,6 +42,8 @@ model_analyzer = Agent(
     tools=[vision_tool],
     verbose=True,
     llm=OLLAMA_LLM,
+    max_iter=5,
+    max_execution_time=60,  # seconds
 )
 
 prompt_engineer = Agent(
@@ -70,6 +72,8 @@ prompt_engineer = Agent(
     ),
     verbose=True,
     llm=OLLAMA_LLM,
+    max_iter=5,
+    max_execution_time=60,  # seconds
 )
 
 image_generator = Agent(

@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from typing import Type
 
 from crewai.tools import BaseTool
@@ -65,21 +66,49 @@ class NanaBananaGenerationTool(BaseTool):
             f"Negative: {negative_prompt}"
         )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=[
-                generation_prompt,
-                clothing_image,  # Reference 1: the garment flat lay
-                model_image,     # Reference 2: the model identity
-            ],
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio=aspect_ratio,
-                    image_size=resolution,
-                ),
-            ),
-        )
+        # Simple, bounded retry with backoff to avoid hammering the API.
+        # Hard cap at 3 attempts (well under your 5-iteration preference).
+        max_attempts = 3
+        backoff_seconds = 5.0
+        last_error: str | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            # Small delay before each call to naturally slow request rate.
+            time.sleep(2.0)
+            try:
+                response = client.models.generate_content(
+                    # model="gemini-2.5-flash-image", # nanobanana 1
+                    model="gemini-3.1-flash-image-preview", # nanobanana 2
+                    
+                    contents=[
+                        generation_prompt,
+                        clothing_image,  # Reference 1: the garment flat lay
+                        model_image,     # Reference 2: the model identity
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_modalities=["TEXT", "IMAGE"],
+                        image_config=types.ImageConfig(
+                            aspect_ratio=aspect_ratio,
+                            image_size=resolution,
+                        ),
+                    ),
+                )
+                break
+            except Exception as e:  # google-genai surfaces 429s here
+                message = str(e)
+                last_error = message
+
+                is_rate_limited = "429" in message or "RESOURCE_EXHAUSTED" in message.upper()
+                if not is_rate_limited or attempt == max_attempts:
+                    return json.dumps({
+                        "status": "error",
+                        "shot": shot_number,
+                        "message": f"Generation failed on attempt {attempt}: {message}",
+                    })
+
+                # Backoff before next (and strictly limited) retry.
+                time.sleep(backoff_seconds)
+                backoff_seconds *= 2
 
         os.makedirs("outputs", exist_ok=True)
         output_path = f"outputs/shot_{shot_number}.png"
