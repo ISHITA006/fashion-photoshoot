@@ -1,175 +1,91 @@
 from crewai import Task
-from agents import clothing_analyzer, model_analyzer, prompt_engineer, image_generator, qc_agent
+from agents import stylist_prompt_planner, image_generator, qc_agent
+
 
 def create_tasks(clothing_path, model_path, product_brief):
 
-    analyze_clothing = Task(
-        description=f"""Analyze the clothing flat lay image at: {clothing_path}
-          Product brief: {product_brief}
+    plan_prompts = Task(
+        description=f"""Analyze both references and create exactly 3 prompts for virtual try-on.
 
-          Use the Vision Analysis Tool with:
+          Inputs:
+          - Clothing flatlay image: {clothing_path}
+          - Model reference image: {model_path}
+          - Product brief: {product_brief}
+
+          First, inspect clothing with Vision Analysis Tool:
             - image_path = "{clothing_path}"
             - analysis_type = "clothing"
             - product_brief = "{product_brief}"
 
-          Extract and return a detailed garment profile JSON containing ALL of these fields:
-            garment_type, primary_color, secondary_colors, fabric_texture,
-            fit_silhouette, key_details (list of 5+ specifics — include any surface details such as
-            embroidery, prints, cutwork, pleats, drape, waistband, pockets, closures, etc. as relevant
-            to the specific garment), styling_notes, brand_aesthetic, target_demographic
-
-          Also include any garment-type-specific fields that apply, for example:
-            - Tops/shirts/dresses: sleeve_style, neckline, hem_style
-            - Bottoms (pants/shorts/skirts): waist_style, leg_style, length, hem_style
-            - Dresses/co-ords: silhouette, length, waist_definition
-
-          Focus your key_details on the hero design features that make this product unique.""",
-        expected_output="Detailed garment profile JSON with all fields above",
-        agent=clothing_analyzer,
-    )
-
-    analyze_model = Task(
-        description=f"""Analyze the model reference photo at: {model_path}
-
-          Use the Vision Analysis Tool with:
+          Then inspect model with Vision Analysis Tool:
             - image_path = "{model_path}"
             - analysis_type = "model"
 
-          Your goal is identity preservation — extract enough detail so the SAME person can be
-          reproduced faithfully in AI-generated images. Return a model profile JSON with ALL of:
-            age_range, ethnicity, skin_tone (use specific Fitzpatrick scale terms + warm/cool undertone),
-            eye_color, eye_shape, nose_description, lip_fullness, face_shape,
-            hair_color, hair_length, hair_style, hair_texture,
-            body_type, height_impression, distinctive_features (list),
-            expression_style, pose_style
+          Use those observations to choose 3 pose concepts that best showcase the product.
+          IMPORTANT REQUIREMENTS FOR ALL SHOTS:
+          1. SAME MODEL: The generated person must be the exact same identity as the reference model.
+          2. SAME GARMENT: The clothing item must match the flatlay exactly (shape, print, trim, color, texture).
+          3. SAME BACKGROUND: all 3 outputs must use a clean white seamless studio background.
+          4. Human realism: natural anatomy, hands, face proportions, and believable pose transitions.
 
-          Do NOT use vague terms like "medium skin" — use precise descriptors like
-          "warm medium-brown skin, Fitzpatrick IV, golden undertone".""",
-        expected_output="Detailed model profile JSON with all identity fields above",
-        agent=model_analyzer,
-    )
-
-    create_prompts = Task(
-        description="""Using the garment profile (from clothing analysis task) and model profile
-          (from model analysis task), create exactly 3 distinct photoshoot prompts.
-
-          CRITICAL RULES YOU MUST FOLLOW:
-          1. NEGATIVE PROMPTS: NEVER include words like: model, person, woman, man, human, face, body,
-            figure, subject, people, individual, portrait, silhouette — these words suppress the human
-            subject and will produce an empty garment or mannequin. This is the #1 failure mode.
-            Negative prompts may ONLY contain technical defect terms:
-            "bad anatomy, extra fingers, deformed hands, fused fingers, blurry, low resolution,
-            overexposed, underexposed, watermark, text overlay, logo, cluttered background,
-            poor lighting, color cast, grain, noise, jpeg artifacts, cropped head, out of frame"
-
-          2. POSITIVE PROMPTS: Start every prompt by anchoring the model's identity using the
-            model profile descriptors BEFORE describing what she's wearing. Structure:
-            "photorealistic fashion editorial, [skin tone] Indian woman [age] years old,
-            [hair description], [face features], wearing [garment description], [shot type],
-            [lighting], [background], shot on Phase One, f/2.8, commercial fashion photography"
-
-          3. IP ADAPTER WEIGHT: Set to 0.80–0.95 to strongly lock in the reference model's appearance.
-
-          4. STYLE STRENGTH: Set to 0.65–0.80 to preserve garment detail while allowing pose variation.
-
-          Shot specifications:
-          - Shot 1 (hero): Full body, front-facing, neutral studio background, soft box lighting
-          - Shot 2 (detail): Three-quarter turn, framing chosen to best showcase the garment's hero design feature (e.g. waist-up for tops, full-length for bottoms/dresses), warm natural light
-          - Shot 3 (dynamic): Slight movement/walking pose showing garment drape and fabric behavior, outdoor urban
+          Shot plan (all on white studio background):
+          - Shot 1: Hero full-body front pose to show overall silhouette.
+          - Shot 2: Pose selected specifically to highlight the garment's key design feature.
+          - Shot 3: Gentle dynamic pose showing drape/movement while keeping product visibility.
 
           Return ONLY a valid JSON array of exactly 3 objects, each with:
-            shot_number (int), shot_type (str), prompt (str), negative_prompt (str),
-            ip_adapter_weight (float), style_strength (float)
+            shot_number (int), shot_type (str), pose_rationale (str), prompt (str),
+            negative_prompt (str), ip_adapter_weight (float), style_strength (float)
+
+          Rules for negative_prompt:
+            - Never include terms that suppress humans (e.g., no model/person/human/woman/man/face/body).
+            - Only include quality defect terms such as bad anatomy, extra fingers, deformed hands,
+              blurry, low resolution, watermark, text overlay, cluttered background, color cast.
 
           No markdown, no explanation — raw JSON array only.""",
-        expected_output="JSON array of exactly 3 prompt objects with shot_number, shot_type, prompt, negative_prompt, ip_adapter_weight, style_strength",
-        agent=prompt_engineer,
-        context=[analyze_clothing, analyze_model],
+        expected_output="JSON array of exactly 3 prompt objects with pose rationale and generation parameters",
+        agent=stylist_prompt_planner,
     )
 
     generate_images = Task(
         description=f"""Using the 3 prompts JSON from the previous task, generate all 3 images.
 
           IMPORTANT: For EVERY generation call you MUST pass:
-            - clothing_image_path = "{clothing_path}"   ← the flat lay garment reference
-            - model_image_path = "{model_path}"         ← the model identity reference
-            Both paths are required every single time. Never omit either one.
+            - clothing_image_path = "{clothing_path}"
+            - model_image_path = "{model_path}"
+            Both paths are required every single time.
 
-          For each of the 3 shots, call the Nano Banana Generation Tool with:
-            - prompt: the prompt string from the JSON
-            - shot_number: the shot_number from the JSON (1, 2, or 3)
-            - clothing_image_path: "{clothing_path}"
-            - model_image_path: "{model_path}"
+          For each shot, call the Nano Banana Generation Tool with:
+            - prompt
+            - shot_number
+            - clothing_image_path
+            - model_image_path
+            - negative_prompt
             - aspect_ratio: "2:3"
             - resolution: "2K"
 
-          When you call the Nano Banana Generation Tool you MUST pass a JSON arguments object with
-          exactly these keys and value types (additional optional keys allowed):
-            {{
-              "prompt": "<the prompt string for this shot>",
-              "shot_number": 1,
-              "clothing_image_path": "{clothing_path}",
-              "model_image_path": "{model_path}"
-            }}
-          Optionally you may also pass:
-            - "negative_prompt": "<string>"
-            - "aspect_ratio": "2:3"
-            - "resolution": "2K"
-          Never pass the tool schema or any object with 'properties' / 'required' keys. Always provide
-          concrete values for at least prompt, shot_number, clothing_image_path, and model_image_path.
-
-          After all 3 calls, return a summary JSON with the output paths:
+          After all 3 calls, return a summary JSON with paths:
             [{{"shot": 1, "path": "..."}}, {{"shot": 2, "path": "..."}}, {{"shot": 3, "path": "..."}}]""",
         expected_output="JSON list of 3 objects with shot number and output file path for each generated image",
         agent=image_generator,
-        context=[create_prompts],
+        context=[plan_prompts],
     )
 
     quality_check = Task(
         description="""Review all 3 generated images using the Quality Check Tool.
-          Use the garment profile and model profile from the earlier analysis tasks as reference.
 
           For each image evaluate:
-          1. MODEL IDENTITY MATCH — Does the face/skin tone/hair match the reference model photo?
-            This is the most critical check. Fail immediately if the person looks different.
-          2. GARMENT ACCURACY — Is the garment clearly visible with correct colors, silhouette, and hero design details (prints, embroidery, drape, cut, etc.) matching the flat lay reference?
-          3. ANATOMY — Are hands, fingers, and limbs natural and well-formed?
-          4. BACKGROUND — Is the background clean and appropriate for the shot type?
-          5. OVERALL COMMERCIAL VIABILITY — Would this pass e-commerce listing standards?
+          1. MODEL IDENTITY MATCH — face/skin tone/hair/build match the reference model.
+          2. GARMENT ACCURACY — garment matches reference flatlay exactly.
+          3. BACKGROUND CONSISTENCY — clean white studio background in all shots.
+          4. ANATOMY — natural hands, limbs, facial proportions.
+          5. COMMERCIAL READINESS — suitable for e-commerce listing.
 
-          For each failed image, provide specific retry instructions that address the root cause.
-
-          Return a QC report JSON:
-            {{
-              "shots": [
-                {{
-                  "shot_number": 1,
-                  "pass": true/false,
-                  "model_identity_match": true/false,
-                  "garment_accurate": true/false,
-                  "anatomy_ok": true/false,
-                  "background_clean": true/false,
-                  "issues": ["..."],
-                  "retry_notes": "..."
-                }},
-                ...
-              ],
-              "overall_pass_rate": "X/3"
-            }}
-
-          When you need to run the Quality Check Tool, you MUST call it with a JSON arguments object
-          that has exactly these keys and value types:
-            {{
-              "image_path": "outputs/shot_1.png",
-              "shot_number": 1,
-              "garment_profile": "<garment profile JSON string>",
-              "model_profile": "<model profile JSON string>"
-            }}
-          Never return or pass the tool schema itself (no 'properties' or 'required' keys). Always
-          provide concrete values for those four fields.""",
+          Return QC report JSON with pass/fail for each shot and retry notes if failed.
+          Use concrete values when calling the Quality Check Tool.""",
         expected_output="Detailed QC report JSON with pass/fail and issues per shot",
         agent=qc_agent,
-        context=[analyze_clothing, analyze_model, generate_images],
+        context=[plan_prompts, generate_images],
     )
 
-    return [analyze_clothing, analyze_model, create_prompts, generate_images, quality_check]
+    return [plan_prompts, generate_images, quality_check]
