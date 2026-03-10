@@ -66,7 +66,8 @@ class NanaBananaGenerationTool(BaseTool):
         )
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash-image",
+            # model="gemini-2.5-flash-image",
+            model="gemini-3.1-flash-image-preview",
             contents=[
                 generation_prompt,
                 clothing_image,  # Reference 1: the garment flat lay

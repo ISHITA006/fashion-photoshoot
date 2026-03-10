@@ -24,6 +24,7 @@ clothing_analyzer = Agent(
     tools=[vision_tool],
     verbose=True,
     llm=OLLAMA_LLM,
+    max_iter=15,
 )
 
 model_analyzer = Agent(
@@ -42,6 +43,7 @@ model_analyzer = Agent(
     tools=[vision_tool],
     verbose=True,
     llm=OLLAMA_LLM,
+    max_iter=15,
 )
 
 prompt_engineer = Agent(
@@ -70,6 +72,7 @@ prompt_engineer = Agent(
     ),
     verbose=True,
     llm=OLLAMA_LLM,
+    max_iter=15,
 )
 
 image_generator = Agent(
